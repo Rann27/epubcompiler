@@ -1,0 +1,92 @@
+{
+  "name": "epub-compiler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Full local desktop EPUB compiler for DOCX light novel workflows.",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "prepare-icons": "node scripts/generate-icons.cjs",
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsc -p tsconfig.electron.json --watch --preserveWatchOutput\" \"wait-on tcp:5173 dist-electron/electron/main.js && node scripts/launch-electron.cjs\"",
+    "build": "tsc -p tsconfig.electron.json && tsc -p tsconfig.json --noEmit && vite build",
+    "package": "pnpm prepare-icons && pnpm build && electron-builder --win --x64",
+    "typecheck": "tsc -p tsconfig.electron.json && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "latest",
+    "@dnd-kit/sortable": "latest",
+    "@dnd-kit/utilities": "latest",
+    "adm-zip": "latest",
+    "@img/sharp-libvips-win32-x64": "latest",
+    "@img/sharp-win32-x64": "latest",
+    "fast-xml-parser": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "sharp": "latest",
+    "uuid": "latest",
+    "yazl": "latest",
+    "zustand": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "latest",
+    "@types/adm-zip": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/yazl": "latest",
+    "@vitejs/plugin-react": "latest",
+    "autoprefixer": "latest",
+    "concurrently": "latest",
+    "electron": "latest",
+    "electron-builder": "latest",
+    "postcss": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "wait-on": "latest"
+  },
+  "volta": {
+    "node": "22.18.0",
+    "pnpm": "9.11.0"
+  },
+  "build": {
+    "appId": "local.epubcompiler.app",
+    "productName": "EPUB Compiler",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "build/icon.ico",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/sharp/**/*",
+      "**/node_modules/@img/**/*",
+      "**/*.node",
+      "**/*.dll"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "EPUB Compiler",
+      "runAfterFinish": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "EPUB Compiler Portable.exe"
+    }
+  }
+}
