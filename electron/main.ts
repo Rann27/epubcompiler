@@ -4,6 +4,7 @@ import path from "node:path";
 import "./ipc/docx.js";
 import "./ipc/epub.js";
 import "./ipc/filesystem.js";
+import "./ipc/presets.js";
 import { createApplicationMenu } from "./menu.js";
 
 const isDev = !app.isPackaged;

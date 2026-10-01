@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
 import { XMLParser } from "fast-xml-parser";
-import type { DocxBlock, DocxRun, ParsedDocx } from "../src/types/book.js";
+import type { DocxBlock, DocxRun, ParsedDocx, TextAlign } from "../src/types/book.js";
 import { normalizeHexColor, normalizeZipPath } from "./utils.js";
 
 const parser = new XMLParser({
@@ -174,7 +174,14 @@ function getRunStyleId(run: Record<string, unknown> | undefined): string | undef
 }
 
 function sameFormatting(a: DocxRun, b: DocxRun): boolean {
-  return a.color === b.color && a.bold === b.bold && a.italic === b.italic && a.underline === b.underline;
+  return (
+    a.color === b.color &&
+    a.bold === b.bold &&
+    a.italic === b.italic &&
+    a.underline === b.underline &&
+    a.fontFamily === b.fontFamily &&
+    a.fontSize === b.fontSize
+  );
 }
 
 // The color everything inherits when nothing overrides it. Runs matching this are
@@ -222,7 +229,115 @@ function collapseRuns(raw: DocxRun[]): DocxRun[] {
   return out;
 }
 
+// --- Style inheritance -------------------------------------------------------
+// Fonts, sizes, alignment and hyphenation are resolved the way Word does: direct
+// formatting, then the style and its basedOn ancestors, then document defaults.
+
+type StyleIndex = { byId: Map<string, Record<string, any>>; defaultParagraphId?: string };
+type ThemeFonts = { major?: string; minor?: string };
+
+function buildStyleIndex(styles: Record<string, any>): StyleIndex {
+  const byId = new Map<string, Record<string, any>>();
+  let defaultParagraphId: string | undefined;
+  for (const style of asArray<Record<string, any>>(styles["w:styles"]?.["w:style"])) {
+    const id = style?.["@_w:styleId"];
+    if (typeof id !== "string") continue;
+    byId.set(id, style);
+    if (style["@_w:type"] === "paragraph" && String(style["@_w:default"]) === "1") defaultParagraphId = id;
+  }
+  return { byId, defaultParagraphId };
+}
+
+// Style first, then each basedOn ancestor. A paragraph with no explicit style
+// uses the document's default paragraph style.
+function styleChain(index: StyleIndex, styleId: string | undefined, useDefault: boolean): Record<string, any>[] {
+  const chain: Record<string, any>[] = [];
+  const seen = new Set<string>();
+  let id = styleId ?? (useDefault ? index.defaultParagraphId : undefined);
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    const style = index.byId.get(id);
+    if (!style) break;
+    chain.push(style);
+    const parent = style["w:basedOn"]?.["@_w:val"];
+    id = typeof parent === "string" ? parent : undefined;
+  }
+  return chain;
+}
+
+function readTheme(zip: AdmZip): ThemeFonts {
+  const entry = zip.getEntry("word/theme/theme1.xml");
+  if (!entry) return {};
+  try {
+    const theme = parser.parse(entry.getData().toString("utf8")) as Record<string, any>;
+    const scheme = theme["a:theme"]?.["a:themeElements"]?.["a:fontScheme"];
+    const face = (node: any) => (typeof node?.["a:latin"]?.["@_typeface"] === "string" ? node["a:latin"]["@_typeface"] : undefined);
+    return { major: face(scheme?.["a:majorFont"]), minor: face(scheme?.["a:minorFont"]) };
+  } catch {
+    return {};
+  }
+}
+
+function readAutoHyphenation(zip: AdmZip): boolean {
+  const entry = zip.getEntry("word/settings.xml");
+  if (!entry) return false;
+  const settings = parser.parse(entry.getData().toString("utf8")) as Record<string, any>;
+  return toggleValue(settings["w:settings"]?.["w:autoHyphenation"]) ?? false;
+}
+
+function latinFontFrom(rFonts: Record<string, any> | undefined, theme: ThemeFonts): string | undefined {
+  if (!rFonts) return undefined;
+  const direct = rFonts["@_w:ascii"] ?? rFonts["@_w:hAnsi"];
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const themed = rFonts["@_w:asciiTheme"] ?? rFonts["@_w:hAnsiTheme"];
+  if (typeof themed !== "string") return undefined;
+  if (/^major/i.test(themed)) return theme.major;
+  if (/^minor/i.test(themed)) return theme.minor;
+  return undefined;
+}
+
+function resolveFontFamily(layers: unknown[], theme: ThemeFonts): string | undefined {
+  for (const layer of layers) {
+    const font = latinFontFrom((layer as Record<string, any> | undefined)?.["w:rFonts"], theme);
+    if (font) return font;
+  }
+  return undefined;
+}
+
+function resolveFontSize(layers: unknown[]): number | undefined {
+  for (const layer of layers) {
+    const raw = (layer as Record<string, any> | undefined)?.["w:sz"]?.["@_w:val"];
+    const halfPoints = Number(raw);
+    if (Number.isFinite(halfPoints) && halfPoints > 0) return halfPoints / 2;
+  }
+  return undefined;
+}
+
+function resolveAlign(layers: unknown[]): TextAlign | undefined {
+  for (const layer of layers) {
+    const raw = (layer as Record<string, any> | undefined)?.["w:jc"]?.["@_w:val"];
+    if (typeof raw !== "string") continue;
+    if (raw === "both" || raw === "distribute" || raw === "thaiDistribute" || raw === "lowKashida" || raw === "mediumKashida" || raw === "highKashida") return "justify";
+    if (raw === "center") return "center";
+    if (raw === "right" || raw === "end") return "right";
+    if (raw === "left" || raw === "start") return "left";
+  }
+  return undefined;
+}
+
+function resolveSuppressHyphens(layers: unknown[]): boolean {
+  for (const layer of layers) {
+    const value = toggleValue((layer as Record<string, any> | undefined)?.["w:suppressAutoHyphens"]);
+    if (value !== undefined) return value;
+  }
+  return false;
+}
+
 type ParagraphContext = {
+  index: StyleIndex;
+  theme: ThemeFonts;
+  // rPr layers below the run itself: paragraph style chain, then document defaults.
+  runLayers: unknown[];
   styles: Record<string, any>;
   inheritedColor: string | undefined;
   inheritedFormatting: RunFormatting;
@@ -237,8 +352,11 @@ function buildRuns(paragraph: Record<string, unknown>, context: ParagraphContext
       formattingFromRpr(findStyleRpr(context.styles, getRunStyleId(run))),
       context.inheritedFormatting
     );
+    const layers = [run["w:rPr"], ...styleChain(context.index, getRunStyleId(run), false).map((style) => style["w:rPr"]), ...context.runLayers];
     return {
       text: textFromNode(run),
+      fontFamily: resolveFontFamily(layers, context.theme),
+      fontSize: resolveFontSize(layers),
       color: color && color !== context.defaultColor ? color : undefined,
       bold: formatting.bold || undefined,
       italic: formatting.italic || undefined,
@@ -293,6 +411,11 @@ export function parseDocx(sourcePath: string): ParsedDocx {
   const styles = readStyles(zip);
   const defaultFont = getNormalStyleFont(styles) ?? getDefaultFont(styles);
   const defaultColor = getDefaultColor(styles);
+  const styleIndex = buildStyleIndex(styles);
+  const theme = readTheme(zip);
+  const autoHyphenation = readAutoHyphenation(zip);
+  const docDefaultRpr = styles["w:styles"]?.["w:docDefaults"]?.["w:rPrDefault"]?.["w:rPr"];
+  const docDefaultPpr = styles["w:styles"]?.["w:docDefaults"]?.["w:pPrDefault"]?.["w:pPr"];
   const defaultFormatting = formattingFromRpr(styles["w:styles"]?.["w:docDefaults"]?.["w:rPrDefault"]?.["w:rPr"]);
   const document = parser.parse(documentEntry.getData().toString("utf8")) as Record<string, any>;
   const body = document["w:document"]?.["w:body"];
@@ -316,11 +439,20 @@ export function parseDocx(sourcePath: string): ParsedDocx {
       formattingFromRpr(findStyleRpr(styles, styleId)),
       defaultFormatting
     );
-    const runs = buildRuns(paragraph, { styles, inheritedColor, inheritedFormatting, defaultColor });
+    const paragraphStyles = styleChain(styleIndex, styleId, true);
+    const runLayers = [...paragraphStyles.map((style) => style["w:rPr"]), docDefaultRpr];
+    const paragraphLayers = [paragraph["w:pPr"], ...paragraphStyles.map((style) => style["w:pPr"]), docDefaultPpr];
+    const runs = buildRuns(paragraph, { index: styleIndex, theme, runLayers, styles, inheritedColor, inheritedFormatting, defaultColor });
+    const align = resolveAlign(paragraphLayers);
+    const hyphens = autoHyphenation && !resolveSuppressHyphens(paragraphLayers);
     const text = runs.map((run) => run.text).join("");
     if (!text) continue;
     const fontFamily = getRunFont(paragraph["w:r"]) ?? getParagraphMarkFont(paragraph) ?? getStyleFont(styles, styleId) ?? defaultFont;
-    blocks.push(level ? { type: "heading", level, text, fontFamily, runs } : { type: "paragraph", text, fontFamily, runs });
+    blocks.push(
+      level
+        ? { type: "heading", level, text, fontFamily, runs, align, hyphens }
+        : { type: "paragraph", text, fontFamily, runs, align, hyphens }
+    );
   }
 
   const stats = fs.statSync(sourcePath);

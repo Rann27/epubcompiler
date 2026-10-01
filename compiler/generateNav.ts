@@ -1,11 +1,14 @@
 import type { BookSection } from "../src/types/book.js";
+import { epubText, normalizeLang } from "../src/i18n/epub.js";
 import { escapeXml, sortByOrder } from "./utils.js";
 
 function hrefFromNav(href: string): string {
   return href === "nav.xhtml" ? "nav.xhtml" : href;
 }
 
-export function generateNav(sections: BookSection[], title = "Table of Contents"): string {
+export function generateNav(sections: BookSection[], language = "id"): string {
+  const lang = normalizeLang(language);
+  const title = epubText(lang).toc;
   const items = sortByOrder(sections)
     .filter((section) => section.includeInToc)
     .map((section) => `      <li><a href="${escapeXml(hrefFromNav(section.href))}">${escapeXml(section.title)}</a></li>`)
@@ -13,7 +16,7 @@ export function generateNav(sections: BookSection[], title = "Table of Contents"
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="id" xml:lang="id">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${lang}" xml:lang="${lang}">
 <head>
   <title>${escapeXml(title)}</title>
   <link rel="stylesheet" type="text/css" href="css/style.css" />

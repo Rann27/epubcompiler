@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { BookSection, FontStatus } from "../src/types/book.js";
-import { sortByOrder } from "./utils.js";
+import { buildStylePlan, collectRunFamilies } from "./stylePlan.js";
 
 type FontRole = FontStatus["role"];
 
@@ -128,7 +128,10 @@ function allSystemFonts(): RegistryFont[] {
   for (const item of [...readRegistryFonts(), ...scanFilesystemFonts()]) {
     const resolved = resolveFontPath(item.fileName);
     if (!resolved || fontExt(resolved) === ".ttc") continue;
-    byFile.set(resolved.toLowerCase(), { ...item, fileName: resolved });
+    // Registry entries come first and carry the real family name; the folder scan only
+    // knows the file name (e.g. "blkchcry" for BlackChancery), so it must not overwrite them.
+    const key = resolved.toLowerCase();
+    if (!byFile.has(key)) byFile.set(key, { ...item, fileName: resolved });
   }
   return [...byFile.values()];
 }
@@ -174,25 +177,12 @@ function choosePrimaryFont(fonts: EmbeddedFont[]): EmbeddedFont | undefined {
   );
 }
 
-function mostCommon(values: string[], fallback: string): string {
-  const counts = new Map<string, number>();
-  for (const value of values.map(cleanFontName).filter(Boolean)) {
-    counts.set(value, (counts.get(value) ?? 0) + 1);
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? fallback;
-}
-
 export function getDocumentFontPlan(sections: BookSection[]) {
-  const textBlocks = sortByOrder(sections).flatMap((section) => section.sourceBlocks);
-  const headingFamily = mostCommon(
-    textBlocks.filter((block) => block.type === "heading").map((block) => block.fontFamily ?? ""),
-    COMPILER_HEADING_FALLBACK
-  );
-  const bodyFamily = mostCommon(
-    textBlocks.filter((block) => block.type === "paragraph").map((block) => block.fontFamily ?? ""),
-    COMPILER_BODY_FALLBACK
-  );
-  return { headingFamily, bodyFamily };
+  const plan = buildStylePlan(sections);
+  return {
+    headingFamily: plan.headingFamily ?? COMPILER_HEADING_FALLBACK,
+    bodyFamily: plan.bodyFamily ?? COMPILER_BODY_FALLBACK
+  };
 }
 
 export function collectEmbeddedFonts(sections: BookSection[]): FontEmbeddingResult {
@@ -203,6 +193,14 @@ export function collectEmbeddedFonts(sections: BookSection[]): FontEmbeddingResu
   ];
   if (!wanted.some((item) => normalize(item.family) === normalize(COMPILER_BODY_FALLBACK))) {
     wanted.push({ family: COMPILER_BODY_FALLBACK, role: "fallback" });
+  }
+
+  // Fonts that individual runs ask for (e.g. a one-off heading in another face).
+  const known = new Set(wanted.map((item) => normalize(item.family)));
+  for (const family of collectRunFamilies(sections)) {
+    if (known.has(normalize(family))) continue;
+    known.add(normalize(family));
+    wanted.push({ family, role: "custom" });
   }
 
   const systemFonts = allSystemFonts();

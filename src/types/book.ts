@@ -14,19 +14,25 @@ export type SectionType =
 export type DocxRun = {
   text: string;
   color?: string;
+  // Resolved through run -> character style -> paragraph style chain -> document defaults.
+  fontFamily?: string;
+  // Point size.
+  fontSize?: number;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
 };
 
+export type TextAlign = "left" | "center" | "right" | "justify";
+
 export type DocxBlock =
-  | { type: "heading"; level: number; text: string; fontFamily?: string; runs?: DocxRun[] }
-  | { type: "paragraph"; text: string; fontFamily?: string; runs?: DocxRun[] }
+  | { type: "heading"; level: number; text: string; fontFamily?: string; runs?: DocxRun[]; align?: TextAlign; hyphens?: boolean }
+  | { type: "paragraph"; text: string; fontFamily?: string; runs?: DocxRun[]; align?: TextAlign; hyphens?: boolean }
   | { type: "image"; relationshipId: string; filename: string; contentType?: string; outputName?: string };
 
 export type FontStatus = {
   family: string;
-  role: "body" | "heading" | "toc" | "fallback";
+  role: "body" | "heading" | "toc" | "fallback" | "custom";
   found: boolean;
   embeddedFiles: string[];
   message: string;
@@ -62,6 +68,10 @@ export type BookMetadata = {
   date: string;
   modified: string;
 };
+
+export type PresetKey = "title" | "author" | "translator" | "language" | "publisher" | "series" | "volume" | "description";
+export type PresetFields = Partial<Record<PresetKey, string>>;
+export type MetadataPreset = { name: string; fields: PresetFields };
 
 export type ParsedDocx = {
   sourcePath: string;
@@ -115,11 +125,15 @@ export type ElectronApi = {
   getFilePath: (file: File) => string;
   chooseDocx: () => Promise<string | null>;
   chooseOutput: (defaultName: string) => Promise<string | null>;
-  analyzeDocx: (path: string) => Promise<{ parsed: ParsedDocx; sections: BookSection[]; metadata: BookMetadata }>;
+  analyzeDocx: (path: string, language?: string) => Promise<{ parsed: ParsedDocx; sections: BookSection[]; metadata: BookMetadata }>;
   compileEpub: (request: CompileRequest) => Promise<CompileResult>;
   loadConfig: () => Promise<{ path: string; config: ProjectConfig } | null>;
   saveConfig: (config: ProjectConfig, path?: string) => Promise<string | null>;
   openFolder: (path: string) => Promise<void>;
+  setLanguage: (language: string) => Promise<void>;
+  loadPresets: () => Promise<MetadataPreset[]>;
+  storePresets: (presets: MetadataPreset[]) => Promise<void>;
+  exportPreset: (name: string, content: string) => Promise<string | null>;
   onMenuAction: (callback: (action: MenuAction) => void) => () => void;
 };
 

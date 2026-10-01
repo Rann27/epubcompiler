@@ -1,6 +1,10 @@
 import { useBookStore } from "../stores/bookStore";
+import { useT } from "../i18n";
+import { epubText } from "../i18n/epub";
 
 export default function TocPage() {
+  const t = useT();
+  const tocTitle = epubText(useBookStore((state) => state.metadata?.language)).toc;
   const sections = useBookStore((state) => state.sections);
   const updateSection = useBookStore((state) => state.updateSection);
   const tocItems = [...sections].sort((a, b) => a.order - b.order).filter((section) => section.includeInToc);
@@ -8,9 +12,9 @@ export default function TocPage() {
   return (
     <div className="grid grid-cols-[360px_minmax(0,1fr)] gap-5">
       <section className="panel p-5">
-        <h2 className="font-bold">ToC Settings</h2>
+        <h2 className="font-bold">{t("toc.settings")}</h2>
         <div className="mt-4 space-y-3 text-sm">
-          <label>ToC title text<input className="field mt-1" value="Table of Contents" readOnly /></label>
+          <label>{t("toc.titleText")}<input className="field mt-1" value={tocTitle} readOnly /></label>
           {sections.map((section) => (
             <label key={section.id} className="flex items-center gap-2 rounded border border-stone-200 p-3">
               <input type="checkbox" checked={section.includeInToc} onChange={(event) => updateSection(section.id, { includeInToc: event.target.checked })} />
@@ -20,12 +24,12 @@ export default function TocPage() {
           ))}
         </div>
         <div className="mt-5 rounded bg-stone-100 p-3 text-xs text-stone-600">
-          Placement: after front illustrations. Title uppercase, divider, sans-serif font, and item lines are locked for MVP.
+          {t("toc.locked")}
         </div>
       </section>
       <section className="panel bg-white p-8">
         <div className="mx-auto max-w-xl">
-          <h1 className="border-b-2 border-stone-300 pb-4 text-center text-2xl font-bold uppercase tracking-[0.15em]">Table of Contents</h1>
+          <h1 className="border-b-2 border-stone-300 pb-4 text-center text-2xl font-bold uppercase tracking-[0.15em]">{tocTitle}</h1>
           <ol className="mt-6 list-none p-0">
             {tocItems.map((item) => (
               <li key={item.id} className="border-b border-stone-200">

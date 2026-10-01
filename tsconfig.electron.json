@@ -13,5 +13,5 @@
     "types": ["node", "electron"],
     "ignoreDeprecations": "6.0"
   },
-  "include": ["electron/**/*.ts", "compiler/**/*.ts", "src/types/**/*.ts"]
+  "include": ["electron/**/*.ts", "compiler/**/*.ts", "src/types/**/*.ts", "src/i18n/epub.ts", "src/i18n/menu.ts"]
 }

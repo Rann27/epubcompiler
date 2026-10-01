@@ -1,4 +1,7 @@
 import { create } from "zustand";
+import { epubText, retitle } from "../i18n/epub";
+import { t, useI18n } from "../i18n";
+import type { UiKey } from "../i18n/ui";
 import type { BookMetadata, BookSection, CompileResult, MenuAction, ParsedDocx, ProjectConfig, SectionType } from "../types/book";
 
 type Step = "import" | "structure" | "toc" | "images" | "metadata" | "compile";
@@ -37,6 +40,12 @@ type BookStore = {
   updateMetadata: (patch: Partial<BookMetadata>) => void;
   setCover: (id: string) => void;
 };
+
+// Errors thrown by the main process are English; swap the known ones for the UI language.
+function localizeError(message: string) {
+  if (message === "The selected file is not a valid DOCX file.") return t("err.invalidDocx");
+  return message;
+}
 
 function sanitizeFileName(name: string) {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "book";
@@ -84,7 +93,7 @@ function buildProjectConfig(state: BookStore): ProjectConfig | null {
     sourceDocx: state.sourceDocx,
     outputPath: state.outputPath,
     metadata: state.metadata,
-    toc: { title: "Table of Contents", placement: "after-front-illustrations", includeInSpine: true, linear: false },
+    toc: { title: epubText(state.metadata.language).toc, placement: "after-front-illustrations", includeInSpine: true, linear: false },
     images: { oneImagePerPage: true, fitMode: "contain", format: "webp", quality: 90 },
     sections: state.sections
   };
@@ -99,7 +108,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
   analyze: async (path) => {
     set({ busy: true, error: "", compileResult: null });
     try {
-      const { parsed, sections, metadata } = await window.epubCompiler.analyzeDocx(path);
+      const { parsed, sections, metadata } = await window.epubCompiler.analyzeDocx(path, useI18n.getState().lang);
       set({
         sourceDocx: path,
         parsed,
@@ -112,7 +121,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
         step: "structure"
       });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "The selected file is not a valid DOCX file." });
+      set({ error: error instanceof Error ? localizeError(error.message) : t("err.invalidDocx") });
     } finally {
       set({ busy: false });
     }
@@ -146,7 +155,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
       });
       set({ outputPath: chosenOutput, compileResult: result });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "Failed to write EPUB file. Please check the output folder permission." });
+      set({ error: error instanceof Error ? localizeError(error.message) : t("err.writeEpub") });
     } finally {
       set({ busy: false });
     }
@@ -154,7 +163,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
   saveConfig: async (saveAs = false) => {
     const config = buildProjectConfig(get());
     if (!config) {
-      set({ error: "Import a DOCX or load a project before saving config." });
+      set({ error: t("err.needProject") });
       return;
     }
     set({ busy: true, error: "" });
@@ -162,7 +171,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
       const savedPath = await window.epubCompiler.saveConfig(config, saveAs ? undefined : get().currentConfigPath || undefined);
       if (savedPath) set({ currentConfigPath: savedPath });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "Failed to save project config." });
+      set({ error: error instanceof Error ? error.message : t("err.saveConfig") });
     } finally {
       set({ busy: false });
     }
@@ -192,7 +201,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
         step: "structure"
       });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : "Failed to load project config." });
+      set({ error: error instanceof Error ? error.message : t("err.loadConfig") });
     } finally {
       set({ busy: false });
     }
@@ -205,7 +214,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
     const actionStep = action.startsWith("step-") ? (action.replace("step-", "") as Step) : null;
     if (actionStep) {
       if (actionStep !== "import" && !get().metadata && get().sections.length === 0) {
-        set({ error: "Import a DOCX or load a project first." });
+        set({ error: t("err.needProjectFirst") });
         return;
       }
       set({ step: actionStep });
@@ -213,7 +222,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
     }
 
     if (action === "new-project") {
-      if (get().metadata && !window.confirm("Reset current project and return to the import screen?")) return;
+      if (get().metadata && !window.confirm(t("confirm.reset"))) return;
       get().resetProject();
       return;
     }
@@ -238,14 +247,25 @@ export const useBookStore = create<BookStore>((set, get) => ({
   updateMetadata: (patch) =>
     set((state) => {
       const metadata = state.metadata ? { ...state.metadata, ...patch } : null;
+      // Changing the EPUB language re-translates the titles the compiler generated
+      // itself (Cover, Illustration N, ...). Titles edited by hand are left alone.
+      const sections =
+        metadata && patch.language !== undefined && patch.language !== state.metadata?.language
+          ? state.sections.map((section) => ({
+              ...section,
+              title: retitle(section.title, metadata.language),
+              image: section.image ? { ...section.image, alt: retitle(section.image.alt, metadata.language) } : undefined
+            }))
+          : state.sections;
       // Keep the auto-derived output filename in sync with the title, unless the
       // user picked an output path manually.
       const outputPath =
         !state.outputManual && state.sourceDocx ? deriveOutputPath(state.sourceDocx, metadata) : state.outputPath;
-      return { metadata, outputPath };
+      return { metadata, outputPath, sections };
     }),
   setCover: (id) =>
     set((state) => {
+      const text = epubText(state.metadata?.language);
       const images = state.sections.filter((section) => section.image);
       const selected = images.find((section) => section.id === id);
       if (!selected) return state;
@@ -259,7 +279,7 @@ export const useBookStore = create<BookStore>((set, get) => ({
         return {
           ...section,
           type,
-          title: isCover ? "Cover" : section.title === "Cover" ? "Illustration" : section.title,
+          title: isCover ? text.cover : section.type === "cover" ? text.illustrationAlt : section.title,
           includeInToc: isCover ? true : section.includeInToc,
           image: { ...section.image, outputName: isCover ? `cover${extension}` : section.image.outputName }
         };
@@ -268,11 +288,4 @@ export const useBookStore = create<BookStore>((set, get) => ({
     })
 }));
 
-export const appSteps: { id: Step; label: string }[] = [
-  { id: "import", label: "Import DOCX" },
-  { id: "structure", label: "Book Structure" },
-  { id: "toc", label: "Table of Contents" },
-  { id: "images", label: "Images" },
-  { id: "metadata", label: "Metadata" },
-  { id: "compile", label: "Compile" }
-];
+export const appSteps: { id: Step; labelKey: UiKey }[] = steps.map((id) => ({ id, labelKey: `step.${id}` as UiKey }));

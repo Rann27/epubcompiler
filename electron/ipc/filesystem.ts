@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { dialog, ipcMain, shell } from "electron";
+import { setMenuLanguage } from "../menu.js";
 import type { ProjectConfig } from "../../src/types/book.js";
 
 ipcMain.handle("dialog:choose-docx", async () => {
@@ -63,4 +64,8 @@ ipcMain.handle("filesystem:export-config", async (_event, config: ProjectConfig)
 ipcMain.handle("filesystem:open-folder", async (_event, targetPath: string) => {
   const folder = fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory() ? targetPath : path.dirname(targetPath);
   await shell.openPath(folder);
+});
+
+ipcMain.handle("app:set-language", async (_event, language: string) => {
+  setMenuLanguage(language);
 });

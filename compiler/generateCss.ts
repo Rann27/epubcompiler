@@ -1,5 +1,6 @@
 import type { EmbeddedFont } from "./fonts.js";
 import { fontFaceCss } from "./fonts.js";
+import { planCss, type StylePlan } from "./stylePlan.js";
 import { colorClassName } from "./utils.js";
 
 type CssOptions = {
@@ -7,6 +8,9 @@ type CssOptions = {
   bodyFamily?: string;
   headingFamily?: string;
   textColors?: string[];
+  plan?: StylePlan;
+  // Override classes collected while rendering (alignment, per-run font/size, ...).
+  styleRules?: string[];
 };
 
 function stack(primary: string, fallback: string) {
@@ -24,6 +28,8 @@ export function generateCss(options: CssOptions = {}): string {
   const headingFamily = options.headingFamily ?? "Constantia";
   const fontFaces = options.fonts?.length ? `${fontFaceCss(options.fonts)}\n\n` : "";
   const textColors = textColorCss(options.textColors ?? []);
+  const typography = options.plan ? planCss(options.plan) : "";
+  const overrides = options.styleRules?.length ? `\n/* Per-paragraph and per-run overrides. */\n${options.styleRules.join("\n\n")}\n` : "";
 
   return `${fontFaces}body {
   color: #1f2933;
@@ -33,10 +39,18 @@ export function generateCss(options: CssOptions = {}): string {
   padding: 1em 5%;
 }
 
-h1 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: ${stack(headingFamily, '"Constantia", Georgia, serif')};
-  font-size: 1.6em;
   line-height: 1.25;
+}
+
+h1 {
+  font-size: 1.6em;
   text-align: center;
 }
 
@@ -147,5 +161,5 @@ body.image-page {
   height: auto;
   object-fit: contain;
 }
-${textColors}`;
+${typography}${textColors}${overrides}`;
 }

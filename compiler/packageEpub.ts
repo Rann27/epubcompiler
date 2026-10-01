@@ -6,6 +6,7 @@ import { generateContainerXml } from "./container.js";
 import { collectEmbeddedFonts } from "./fonts.js";
 import { generateCss } from "./generateCss.js";
 import { generateNav } from "./generateNav.js";
+import { buildStylePlan, type StyleRegistry } from "./stylePlan.js";
 import { generateOpf } from "./generateOpf.js";
 import { collectTextColors, generateSectionXhtml } from "./generateXhtml.js";
 import { processImages } from "./processImages.js";
@@ -37,6 +38,13 @@ export async function packageEpub(request: CompileRequest): Promise<CompileResul
   const images = await processImages(request.sourceDocx, sections, request.imageQuality);
   const fontEmbedding = collectEmbeddedFonts(sections);
 
+  // Render pages first: rendering collects the per-paragraph/run override classes the stylesheet needs.
+  const plan = buildStylePlan(sections);
+  const styleRegistry: StyleRegistry = new Map();
+  const pages = sortByOrder(sections)
+    .filter((item) => item.type !== "toc")
+    .map((section) => ({ href: section.href, xhtml: generateSectionXhtml(section, request.metadata.language, plan, styleRegistry) }));
+
   addBuffer(zip, "application/epub+zip", "mimetype", false);
   addBuffer(zip, generateContainerXml(), "META-INF/container.xml");
   addBuffer(
@@ -45,15 +53,17 @@ export async function packageEpub(request: CompileRequest): Promise<CompileResul
       fonts: fontEmbedding.fonts,
       bodyFamily: fontEmbedding.bodyFamily,
       headingFamily: fontEmbedding.headingFamily,
-      textColors: collectTextColors(sections)
+      textColors: collectTextColors(sections),
+      plan,
+      styleRules: [...styleRegistry.values()]
     }),
     "OEBPS/css/style.css"
   );
-  addBuffer(zip, generateNav(sections), "OEBPS/nav.xhtml");
+  addBuffer(zip, generateNav(sections, request.metadata.language), "OEBPS/nav.xhtml");
   addBuffer(zip, generateOpf(request.metadata, sections, fontEmbedding.fonts), "OEBPS/content.opf");
 
-  for (const section of sortByOrder(sections).filter((item) => item.type !== "toc")) {
-    addBuffer(zip, generateSectionXhtml(section), `OEBPS/${section.href}`);
+  for (const page of pages) {
+    addBuffer(zip, page.xhtml, `OEBPS/${page.href}`);
   }
 
   for (const [name, buffer] of images) {

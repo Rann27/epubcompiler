@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { FileText, FileX2, FolderOpen, Loader2, UploadCloud } from "lucide-react";
 import { useBookStore } from "../stores/bookStore";
+import { useT } from "../i18n";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -11,6 +12,7 @@ function formatSize(size: number) {
 type DragState = "idle" | "valid" | "invalid";
 
 export default function ImportPage() {
+  const t = useT();
   const parsed = useBookStore((state) => state.parsed);
   const busy = useBookStore((state) => state.busy);
   const chooseDocx = useBookStore((state) => state.chooseDocx);
@@ -36,12 +38,12 @@ export default function ImportPage() {
     const file = event.dataTransfer.files[0];
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".docx")) {
-      setDropError("That's not a .docx file. Please drop a Word .docx document.");
+      setDropError(t("import.notDocx"));
       return;
     }
     const path = window.epubCompiler.getFilePath(file);
     if (!path) {
-      setDropError("Could not read the file path. Try using Choose DOCX instead.");
+      setDropError(t("import.noPath"));
       return;
     }
     setDropError(null);
@@ -90,15 +92,15 @@ export default function ImportPage() {
         )}
         <div className={`mt-4 text-lg font-bold ${drag === "invalid" ? "text-red-600" : isDragging ? "text-teal-700" : ""}`}>
           {drag === "valid"
-            ? "Release to import your DOCX"
+            ? t("import.release")
             : drag === "invalid"
-            ? "Only .docx files are supported"
-            : "Drop your DOCX here or choose a file to start compiling your EPUB."}
+            ? t("import.onlyDocx")
+            : t("import.drop")}
         </div>
         {!isDragging && (
           <button type="button" className="button mt-5" onClick={chooseDocx} disabled={busy}>
             {busy ? <Loader2 className="animate-spin" size={16} /> : <FolderOpen size={16} />}
-            Choose DOCX
+            {t("import.choose")}
           </button>
         )}
         {dropError && !isDragging && <div className="mt-3 text-sm font-semibold text-red-600">{dropError}</div>}
@@ -106,13 +108,13 @@ export default function ImportPage() {
 
       {parsed && (
         <section className="panel p-5">
-          <h2 className="font-bold">Parse Summary</h2>
+          <h2 className="font-bold">{t("import.summary")}</h2>
           <div className="mt-4 grid grid-cols-5 gap-3 text-sm">
-            <div><span className="text-stone-500">Filename</span><div className="font-semibold">{parsed.filename}</div></div>
-            <div><span className="text-stone-500">Size</span><div className="font-semibold">{formatSize(parsed.size)}</div></div>
-            <div><span className="text-stone-500">Paragraphs</span><div className="font-semibold">{parsed.summary.paragraphs}</div></div>
-            <div><span className="text-stone-500">Headings</span><div className="font-semibold">{parsed.summary.headings}</div></div>
-            <div><span className="text-stone-500">Images</span><div className="font-semibold">{parsed.summary.images}</div></div>
+            <div><span className="text-stone-500">{t("import.filename")}</span><div className="font-semibold">{parsed.filename}</div></div>
+            <div><span className="text-stone-500">{t("import.size")}</span><div className="font-semibold">{formatSize(parsed.size)}</div></div>
+            <div><span className="text-stone-500">{t("import.paragraphs")}</span><div className="font-semibold">{parsed.summary.paragraphs}</div></div>
+            <div><span className="text-stone-500">{t("import.headings")}</span><div className="font-semibold">{parsed.summary.headings}</div></div>
+            <div><span className="text-stone-500">{t("import.images")}</span><div className="font-semibold">{parsed.summary.images}</div></div>
           </div>
         </section>
       )}
